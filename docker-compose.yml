@@ -1,0 +1,8 @@
+services:
+  healthping:
+    build: .
+    image: healthping:dev
+    container_name: healthping
+    restart: unless-stopped
+    volumes:
+      - ./config.example.yaml:/app/config.yaml:ro

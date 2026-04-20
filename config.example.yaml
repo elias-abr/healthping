@@ -1,0 +1,20 @@
+endpoints:
+  - name: github
+    url: https://api.github.com
+    interval_seconds: 30
+    timeout_seconds: 5
+
+  - name: google
+    url: https://www.google.com
+    method: HEAD
+    interval_seconds: 60
+    timeout_seconds: 3
+
+  - name: httpbin-delayed
+    url: https://httpbin.org/delay/1
+    interval_seconds: 45
+    timeout_seconds: 3
+    expected_status: 200
+
+alerts:
+  webhook_url: null
