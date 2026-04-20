@@ -32,4 +32,4 @@ COPY --chown=healthping:healthping src ./src
 USER healthping
 
 ENTRYPOINT ["python", "-m", "healthping.cli"]
-CMD ["--config", "/app/config.yaml"]
+CMD ["monitor", "--config", "/app/config.yaml"]

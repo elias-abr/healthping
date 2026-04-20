@@ -18,6 +18,7 @@ from healthping.alerts import send_alert
 from healthping.config import ConfigError, load_config
 from healthping.models import AppConfig, CheckResult, CheckStatus, EndpointConfig
 from healthping.monitor import check_endpoint
+from healthping.state import MonitorState
 
 
 def _configure_logging(log_file: Path | None) -> None:
@@ -35,7 +36,6 @@ def _configure_logging(log_file: Path | None) -> None:
 
     if log_file is not None:
         log_file.parent.mkdir(parents=True, exist_ok=True)
-        # Tee stdout to a file as well.
         sys.stdout = _Tee(sys.stdout, log_file.open("a", encoding="utf-8"))  # type: ignore[assignment]
 
 
@@ -60,7 +60,7 @@ async def _run_endpoint_loop(
     endpoint: EndpointConfig,
     client: httpx.AsyncClient,
     config: AppConfig,
-    state: dict[str, CheckStatus],
+    state: MonitorState,
     stop_event: asyncio.Event,
 ) -> None:
     """Run an indefinite check loop for one endpoint."""
@@ -70,7 +70,8 @@ async def _run_endpoint_loop(
         result = await check_endpoint(client, endpoint)
         _emit_result(log, result)
 
-        previous = state.get(endpoint.name)
+        previous = await state.record(result)
+
         should_alert = config.alerts.webhook_url is not None and (
             (previous is None and result.status == CheckStatus.DOWN)
             or (previous is not None and previous != result.status)
@@ -83,12 +84,9 @@ async def _run_endpoint_loop(
                 previous=previous if previous is not None else CheckStatus.UP,
                 current=result,
             )
-        state[endpoint.name] = result.status
 
-        try:
+        with suppress(asyncio.TimeoutError):
             await asyncio.wait_for(stop_event.wait(), timeout=endpoint.interval_seconds)
-        except TimeoutError:
-            continue
 
 
 def _emit_result(log: structlog.stdlib.BoundLogger, result: CheckResult) -> None:
@@ -97,15 +95,10 @@ def _emit_result(log: structlog.stdlib.BoundLogger, result: CheckResult) -> None
     log.info("check_result", **payload)
 
 
-async def _main_async(config: AppConfig) -> None:
+async def run_monitor(
+    config: AppConfig, state: MonitorState, stop_event: asyncio.Event
+) -> None:
     """Start concurrent check loops for all configured endpoints."""
-    state: dict[str, CheckStatus] = {}
-    stop_event = asyncio.Event()
-
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, stop_event.set)
-
     async with httpx.AsyncClient() as client:
         tasks = [
             asyncio.create_task(
@@ -119,7 +112,55 @@ async def _main_async(config: AppConfig) -> None:
         await asyncio.gather(*tasks, return_exceptions=True)
 
 
-@click.command()
+async def _main_async(config: AppConfig) -> None:
+    """Main entry: run the monitor until signalled to stop."""
+    state = MonitorState()
+    stop_event = asyncio.Event()
+
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, stop_event.set)
+
+    await run_monitor(config, state, stop_event)
+
+
+async def _serve_async(config: AppConfig, host: str, port: int) -> None:
+    """Run the monitor and HTTP API concurrently in one process."""
+    import uvicorn
+
+    from healthping.api import create_app
+
+    state = MonitorState()
+    stop_event = asyncio.Event()
+
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, stop_event.set)
+
+    app = create_app(state, allowed_origins=["*"])
+    uvicorn_config = uvicorn.Config(
+        app,
+        host=host,
+        port=port,
+        log_level="warning",  # don't fight with our structlog output
+        access_log=False,
+    )
+    server = uvicorn.Server(uvicorn_config)
+
+    monitor_task = asyncio.create_task(run_monitor(config, state, stop_event))
+    server_task = asyncio.create_task(server.serve())
+
+    await stop_event.wait()
+    server.should_exit = True
+    await asyncio.gather(monitor_task, server_task, return_exceptions=True)
+
+
+@click.group()
+def main() -> None:
+    """healthping — a lightweight async HTTP health monitor."""
+
+
+@main.command()
 @click.option(
     "--config",
     "config_path",
@@ -133,8 +174,8 @@ async def _main_async(config: AppConfig) -> None:
     default=None,
     help="Optional path to also write JSON logs to.",
 )
-def main(config_path: Path, log_file: Path | None) -> None:
-    """healthping — a lightweight async HTTP health monitor."""
+def monitor(config_path: Path, log_file: Path | None) -> None:
+    """Run the monitor only (alerts + logs, no HTTP API)."""
     _configure_logging(log_file)
 
     try:
@@ -145,6 +186,52 @@ def main(config_path: Path, log_file: Path | None) -> None:
 
     with suppress(KeyboardInterrupt):
         asyncio.run(_main_async(config))
+
+
+@main.command()
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+    help="Path to the YAML config file.",
+)
+@click.option(
+    "--log-file",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Optional path to also write JSON logs to.",
+)
+@click.option(
+    "--host",
+    default="0.0.0.0",
+    show_default=True,
+    help="HTTP API bind host.",
+)
+@click.option(
+    "--port",
+    default=8000,
+    show_default=True,
+    type=int,
+    help="HTTP API bind port.",
+)
+def serve(
+    config_path: Path,
+    log_file: Path | None,
+    host: str,
+    port: int,
+) -> None:
+    """Run the monitor and the HTTP API together."""
+    _configure_logging(log_file)
+
+    try:
+        config = load_config(config_path)
+    except ConfigError as exc:
+        click.echo(f"Config error: {exc}", err=True)
+        sys.exit(1)
+
+    with suppress(KeyboardInterrupt):
+        asyncio.run(_serve_async(config, host, port))
 
 
 if __name__ == "__main__":
