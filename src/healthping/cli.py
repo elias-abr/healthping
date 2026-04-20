@@ -71,15 +71,16 @@ async def _run_endpoint_loop(
         _emit_result(log, result)
 
         previous = state.get(endpoint.name)
-        if (
-            previous is not None
-            and previous != result.status
-            and config.alerts.webhook_url is not None
-        ):
+        should_alert = config.alerts.webhook_url is not None and (
+            (previous is None and result.status == CheckStatus.DOWN)
+            or (previous is not None and previous != result.status)
+        )
+        if should_alert and config.alerts.webhook_url is not None:
             await send_alert(
                 client=client,
                 webhook_url=str(config.alerts.webhook_url),
-                previous=previous,
+                platform=config.alerts.platform,
+                previous=previous if previous is not None else CheckStatus.UP,
                 current=result,
             )
         state[endpoint.name] = result.status

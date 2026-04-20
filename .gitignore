@@ -49,3 +49,4 @@ logs/
 *.log
 .env
 .env.local
+config.local.yaml

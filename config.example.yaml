@@ -17,4 +17,7 @@ endpoints:
     expected_status: 200
 
 alerts:
+  # Set to "slack" or "discord"
+  platform: slack
+  # webhook_url: https://hooks.slack.com/services/XXX/YYY/ZZZ
   webhook_url: null

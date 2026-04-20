@@ -25,10 +25,18 @@ class EndpointConfig(BaseModel):
     interval_seconds: int = Field(default=30, ge=5)
 
 
+class AlertPlatform(StrEnum):
+    """Webhook target platform."""
+
+    SLACK = "slack"
+    DISCORD = "discord"
+
+
 class AlertConfig(BaseModel):
     """Configuration for webhook alerts."""
 
     webhook_url: HttpUrl | None = None
+    platform: AlertPlatform = AlertPlatform.SLACK
 
 
 class AppConfig(BaseModel):
