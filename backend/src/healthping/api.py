@@ -49,12 +49,12 @@ def create_app(state: MonitorState, allowed_origins: list[str]) -> FastAPI:
     )
 
     @app.get("/api/health", response_model=HealthResponse, tags=["meta"])
-    async def health() -> HealthResponse:
+    async def health() -> HealthResponse:  # pyright: ignore[reportUnusedFunction]
         """Liveness check for the API itself."""
         return HealthResponse(status="ok")
 
     @app.get("/api/status", response_model=StatusResponse, tags=["monitor"])
-    async def status() -> StatusResponse:
+    async def status() -> StatusResponse:  # pyright: ignore[reportUnusedFunction]
         """Return the latest known check result for every endpoint."""
         return StatusResponse(
             started_at=state.started_at,

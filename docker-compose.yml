@@ -1,11 +1,24 @@
 services:
-  healthping:
+  backend:
     build: ./backend
-    image: healthping:dev
-    container_name: healthping
+    image: healthping-backend:dev
+    container_name: healthping-backend
     restart: unless-stopped
     volumes:
       - ./backend/config.example.yaml:/app/config.yaml:ro
     ports:
       - "8000:8000"
     command: ["serve", "--config", "/app/config.yaml", "--host", "0.0.0.0", "--port", "8000"]
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_BASE_URL: "http://localhost:8000"
+    image: healthping-frontend:dev
+    container_name: healthping-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend

@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml ./
 COPY src ./src
 
 RUN pip install --no-cache-dir --upgrade pip && \
@@ -30,6 +30,8 @@ COPY --from=builder /install /usr/local/lib/python3.12/site-packages
 COPY --chown=healthping:healthping src ./src
 
 USER healthping
+
+EXPOSE 8000
 
 ENTRYPOINT ["python", "-m", "healthping.cli"]
 CMD ["monitor", "--config", "/app/config.yaml"]

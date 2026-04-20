@@ -2,7 +2,7 @@
 name = "healthping"
 version = "0.1.0"
 description = "Lightweight async HTTP health monitor with webhook alerts."
-readme = "README.md"
+readme = { text = "See https://github.com/elias-abr/healthping", content-type = "text/plain" }
 license = { text = "MIT" }
 authors = [
     { name = "Elias Abou Rached", email = "eliasabourached03@gmail.com" },
@@ -30,6 +30,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+healthping = ["py.typed"]
 
 [tool.ruff]
 line-length = 88
