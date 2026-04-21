@@ -4,8 +4,13 @@ services:
     image: healthping-backend:dev
     container_name: healthping-backend
     restart: unless-stopped
+    environment:
+      HEALTHPING_JWT_SECRET: "${HEALTHPING_JWT_SECRET:?set HEALTHPING_JWT_SECRET in .env}"
+      HEALTHPING_DB_PATH: "/app/data/healthping.db"
+      HEALTHPING_ALLOWED_ORIGINS: '["http://localhost:3000"]'
     volumes:
       - ./backend/config.example.yaml:/app/config.yaml:ro
+      - healthping_data:/app/data
     ports:
       - "8000:8000"
     command: ["serve", "--config", "/app/config.yaml", "--host", "0.0.0.0", "--port", "8000"]
@@ -22,3 +27,6 @@ services:
       - "3000:3000"
     depends_on:
       - backend
+
+volumes:
+  healthping_data:

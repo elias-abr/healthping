@@ -50,3 +50,6 @@ logs/
 .env
 .env.local
 config.local.yaml
+.claudecode/
+*.db
+*.db-journal

@@ -5,6 +5,7 @@ import { Activity, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { EndpointCard } from "@/components/EndpointCard";
+import { UserMenu } from "@/components/UserMenu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchStatus } from "@/lib/api";
 import type { StatusResponse } from "@/types/status";
@@ -68,14 +69,17 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {data && (
-            <div className="text-muted-foreground flex items-center gap-2 text-xs">
-              <RefreshCw
-                className={`h-3 w-3 ${isRefreshing ? "animate-spin" : ""}`}
-              />
-              Auto-refreshes every 10s
-            </div>
-          )}
+          <div className="flex items-center gap-4">
+            {data && (
+              <div className="text-muted-foreground flex items-center gap-2 text-xs">
+                <RefreshCw
+                  className={`h-3 w-3 ${isRefreshing ? "animate-spin" : ""}`}
+                />
+                Auto-refreshes every 10s
+              </div>
+            )}
+            <UserMenu />
+          </div>
         </header>
 
         {error && (

@@ -13,11 +13,14 @@ from typing import Any
 import click
 import httpx
 import structlog
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from healthping.alerts import send_alert
 from healthping.config import ConfigError, load_config
+from healthping.db.base import build_engine_and_factory
 from healthping.models import AppConfig, CheckResult, CheckStatus, EndpointConfig
 from healthping.monitor import check_endpoint
+from healthping.settings import Settings
 from healthping.state import MonitorState
 
 
@@ -124,7 +127,43 @@ async def _main_async(config: AppConfig) -> None:
     await run_monitor(config, state, stop_event)
 
 
-async def _serve_async(config: AppConfig, host: str, port: int) -> None:
+def _run_migrations_sync(db_path: str) -> None:
+    """Apply pending Alembic migrations synchronously before the event loop starts."""
+    import os
+    from pathlib import Path as _Path
+
+    from alembic import command
+    from alembic.config import Config as AlembicConfig
+
+    # Ensure the DB directory exists (SQLite can create the file but not its parent dir)
+    db_file = _Path(db_path)
+    if not db_file.is_absolute() or db_path != ":memory:":
+        db_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Locate alembic.ini — cwd works in Docker (/app) and in dev (backend/)
+    here = _Path(__file__).resolve().parent
+    candidates = [
+        _Path.cwd() / "alembic.ini",
+        here.parent.parent.parent / "alembic.ini",  # dev: backend/src/healthping → backend/
+    ]
+    ini_path = next((p for p in candidates if p.exists()), None)
+    if ini_path is None:
+        raise RuntimeError(
+            "alembic.ini not found; expected alongside migrations/ directory"
+        )
+
+    os.environ.setdefault("HEALTHPING_DB_PATH", db_path)
+    alembic_cfg = AlembicConfig(str(ini_path))
+    command.upgrade(alembic_cfg, "head")
+
+
+async def _serve_async(
+    config: AppConfig,
+    host: str,
+    port: int,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
     """Run the monitor and HTTP API concurrently in one process."""
     import uvicorn
 
@@ -137,7 +176,12 @@ async def _serve_async(config: AppConfig, host: str, port: int) -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop_event.set)
 
-    app = create_app(state, allowed_origins=["*"])
+    app = create_app(
+        state,
+        allowed_origins=settings.allowed_origins,
+        session_factory=session_factory,
+        settings=settings,
+    )
     uvicorn_config = uvicorn.Config(
         app,
         host=host,
@@ -230,8 +274,22 @@ def serve(
         click.echo(f"Config error: {exc}", err=True)
         sys.exit(1)
 
+    try:
+        settings = Settings()  # type: ignore[call-arg]
+    except Exception as exc:
+        click.echo(f"Configuration error: {exc}", err=True)
+        sys.exit(1)
+
+    try:
+        _run_migrations_sync(settings.db_path)
+    except Exception as exc:
+        click.echo(f"Migration error: {exc}", err=True)
+        sys.exit(1)
+
+    _engine, session_factory = build_engine_and_factory(settings.db_path)
+
     with suppress(KeyboardInterrupt):
-        asyncio.run(_serve_async(config, host, port))
+        asyncio.run(_serve_async(config, host, port, session_factory, settings))
 
 
 if __name__ == "__main__":
