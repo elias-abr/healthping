@@ -36,7 +36,7 @@ def _configure_logging(log_file: Path | None) -> None:
 
     if log_file is not None:
         log_file.parent.mkdir(parents=True, exist_ok=True)
-        sys.stdout = _Tee(sys.stdout, log_file.open("a", encoding="utf-8"))  # type: ignore[assignment]
+        sys.stdout = _Tee(sys.stdout, log_file.open("a", encoding="utf-8"))
 
 
 class _Tee:

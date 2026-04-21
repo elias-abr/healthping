@@ -1,46 +1,84 @@
 # healthping
 
-A lightweight, async-first HTTP health monitor with webhook alerts. Define endpoints in a YAML file, run one command, get structured JSON logs and Slack/Discord alerts when something changes state.
+A lightweight, async-first HTTP health monitor with a live web dashboard and webhook alerts. Define endpoints in a YAML file, run one command, get a real-time status dashboard plus Slack/Discord notifications when anything changes.
 
 ---
 
 ## Features
 
-- **Async concurrent checks** — all endpoints polled in parallel using a single shared connection pool
-- **Structured JSON logs** — every check emitted as a parseable log line ready for Loki, Datadog, or any aggregator
-- **Webhook alerts on state transitions** — only alerts on `up → down` and `down → up`, no noise
-- **Per-endpoint configuration** — interval, timeout, expected status, and method all tuneable individually
+- **Async concurrent checks** — all endpoints polled in parallel using a shared connection pool
+- **Live web dashboard** — Next.js 16 + shadcn/ui, auto-refreshes every 10 seconds, clean on mobile and desktop
+- **Structured JSON logs** — every check emitted as parseable JSON, ready for Loki / Datadog / any aggregator
+- **Webhook alerts on state transitions** — only alerts on up→down and down→up, no noise
+- **Slack or Discord** — same config, different platforms
+- **Per-endpoint configuration** — interval, timeout, expected status, and method all tuneable
 - **Fault tolerant** — no single failure (timeout, DNS, broken webhook) can crash the monitor
-- **Small footprint** — ~80MB Docker image, non-root container, ~300 lines of typed Python
+- **Fully dockerized** — backend and frontend each in their own container, one compose command to run
+
+---
+
+## Architecture
+
+```
+┌──────────────┐         ┌──────────────────────┐
+│  Next.js UI  │◄────────│  FastAPI HTTP API    │
+│  (port 3000) │  REST   │  /api/status         │
+└──────────────┘         │  /api/health         │
+                         └──────────┬───────────┘
+                                    │ shared state
+                         ┌──────────▼───────────┐
+                         │  Monitor loops       │
+                         │  (one task per       │
+                         │   endpoint, async)   │
+                         └──────────┬───────────┘
+                                    │
+                     ┌──────────────┼──────────────┐
+                     ▼              ▼              ▼
+                 endpoint 1    endpoint 2    endpoint N
+                                    │
+                                    │ on state change
+                                    ▼
+                           ┌────────────────┐
+                           │ Slack/Discord  │
+                           │    webhook     │
+                           └────────────────┘
+```
 
 ---
 
 ## Quick start
 
-### With Docker (recommended)
+### Full stack with Docker Compose
 
 ```bash
 git clone git@github.com:elias-abr/healthping.git
 cd healthping
-docker compose up
+docker compose up --build
 ```
 
-### Local Python
+Visit `http://localhost:3000` for the dashboard, `http://localhost:8000/api/status` for the raw API.
+
+### Backend only (CLI mode)
 
 ```bash
-git clone git@github.com:elias-abr/healthping.git
-cd healthping
+cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
-healthping --config config.example.yaml
+healthping monitor --config config.example.yaml
+```
+
+### Backend with API (no frontend)
+
+```bash
+healthping serve --config config.example.yaml
 ```
 
 ---
 
 ## Configuration
 
-Configuration lives in a YAML file. Minimum viable config:
+Configuration lives in a YAML file. Minimal config:
 
 ```yaml
 endpoints:
@@ -48,7 +86,7 @@ endpoints:
     url: https://api.example.com/health
 ```
 
-Full example with all options:
+Full config with all options:
 
 ```yaml
 endpoints:
@@ -65,16 +103,15 @@ endpoints:
     interval_seconds: 60
 
 alerts:
-  webhook_url: https://hooks.slack.com/services/XXX/YYY/ZZZ
+  platform: discord # or "slack"
+  webhook_url: https://discord.com/api/webhooks/XXX/YYY
 ```
-
-The `webhook_url` is compatible with both Slack and Discord incoming webhooks. Omit it to disable alerting.
 
 ---
 
 ## Output
 
-Every check produces one JSON log line on stdout:
+Every check emits a single JSON log line to stdout:
 
 ```json
 {
@@ -99,36 +136,106 @@ On a state transition, a webhook alert is also posted:
 
 ---
 
-## Development
+## HTTP API
 
-```bash
-# Install with dev dependencies
-pip install -e ".[dev]"
+Available when running `healthping serve` or via Docker Compose.
 
-# Run tests
-pytest -v
+### `GET /api/health`
 
-# Lint + format
-ruff check .
-ruff format .
+Liveness check for the API itself.
 
-# Type check
-mypy src
+```json
+{ "status": "ok" }
 ```
 
-Tests use `httpx.MockTransport` — no real network traffic, no flakiness.
+### `GET /api/status`
+
+Latest known status of every configured endpoint.
+
+```json
+{
+  "started_at": "2026-04-20T10:00:00Z",
+  "now": "2026-04-20T10:05:30Z",
+  "endpoints": [
+    {
+      "endpoint_name": "api",
+      "url": "https://api.example.com/health",
+      "status": "up",
+      "response_time_ms": 142.33,
+      "http_status": 200,
+      "error": null,
+      "timestamp": "2026-04-20T10:05:25Z"
+    }
+  ]
+}
+```
+
+Interactive OpenAPI docs available at `/docs` when running the API.
 
 ---
 
-## Architecture
+## Project structure
 
-- **`models.py`** — Pydantic domain types. All validation happens here.
-- **`config.py`** — YAML loading with explicit error types.
-- **`monitor.py`** — Stateless async check function. Never raises; failures become `DOWN` results.
-- **`alerts.py`** — Webhook dispatcher. Alert failures are logged, never propagated.
-- **`cli.py`** — Click-based CLI. Wires everything together, handles signals for clean shutdown.
+```
+healthping/
+├── backend/              # Python 3.12 FastAPI monitor + API
+│   ├── src/healthping/
+│   │   ├── api.py         # FastAPI app (read-only)
+│   │   ├── state.py       # Shared in-memory state
+│   │   ├── monitor.py     # Async check function
+│   │   ├── cli.py         # Click CLI (monitor / serve)
+│   │   ├── alerts.py      # Slack + Discord webhooks
+│   │   ├── config.py      # YAML config loader
+│   │   └── models.py      # Pydantic models
+│   ├── tests/
+│   └── Dockerfile
+├── frontend/             # Next.js 16 + React 19 + Tailwind + shadcn/ui
+│   ├── src/
+│   │   ├── app/page.tsx           # Dashboard
+│   │   ├── components/
+│   │   │   └── EndpointCard.tsx
+│   │   ├── lib/api.ts             # API client
+│   │   └── types/status.ts
+│   └── Dockerfile
+└── docker-compose.yml
+```
 
-All timestamps are UTC. The check loop uses a cooperative `asyncio.Event` for cancellation, so `SIGINT` / `SIGTERM` shut down cleanly even mid-sleep.
+---
+
+## Development
+
+### Backend
+
+```bash
+cd backend
+source .venv/bin/activate
+pip install -e ".[dev]"
+pytest -v                  # 15 tests
+ruff check .
+ruff format .
+mypy src
+```
+
+Tests use `httpx.MockTransport` and FastAPI's `TestClient` — no real network traffic, no flakiness.
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev                # http://localhost:3000
+npm run lint
+npm run build
+```
+
+---
+
+## Roadmap
+
+- [ ] v2 — Auth, endpoint management via UI, persistence
+- [ ] v2 — WebSocket real-time updates (replace 10s polling)
+- [ ] v2 — Historical charts (response time over time, uptime percentage)
+- [ ] v2 — Alert debouncing (require N consecutive failures before notifying)
 
 ---
 

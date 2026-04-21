@@ -1,23 +1,40 @@
 endpoints:
-  - name: github
-    url: https://api.github.com
-    interval_seconds: 30
-    timeout_seconds: 5
-
-  - name: google
-    url: https://www.google.com
-    method: HEAD
+  - name: claude
+    url: https://status.claude.com/api/v2/status.json
     interval_seconds: 60
-    timeout_seconds: 3
+    json_status_path: status.indicator
+    json_expected_values: [ none, minor ]
 
-  - name: httpbin-delayed
-    url: https://httpbin.org/delay/1
-    interval_seconds: 45
-    timeout_seconds: 3
-    expected_status: 200
+  - name: openai
+    url: https://status.openai.com/api/v2/status.json
+    interval_seconds: 60
+    json_status_path: status.indicator
+    json_expected_values: [ none, minor ]
+
+  - name: github
+    url: https://www.githubstatus.com/api/v2/status.json
+    interval_seconds: 60
+    json_status_path: status.indicator
+    json_expected_values: [ none, minor ]
+
+  - name: cloudflare
+    url: https://www.cloudflarestatus.com/api/v2/status.json
+    interval_seconds: 60
+    json_status_path: status.indicator
+    json_expected_values: [ none, minor ]
+
+  - name: vercel
+    url: https://www.vercel-status.com/api/v2/status.json
+    interval_seconds: 60
+    json_status_path: status.indicator
+    json_expected_values: [ none, minor ]
+
+  - name: discord
+    url: https://discordstatus.com/api/v2/status.json
+    interval_seconds: 60
+    json_status_path: status.indicator
+    json_expected_values: [ none, minor ]
 
 alerts:
-  # Set to "slack" or "discord"
   platform: slack
-  # webhook_url: https://hooks.slack.com/services/XXX/YYY/ZZZ
   webhook_url: null

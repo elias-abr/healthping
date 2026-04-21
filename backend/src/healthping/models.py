@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 
 class CheckStatus(StrEnum):
@@ -23,6 +23,18 @@ class EndpointConfig(BaseModel):
     timeout_seconds: float = Field(default=5.0, gt=0, le=60)
     expected_status: int = Field(default=200, ge=100, le=599)
     interval_seconds: int = Field(default=30, ge=5)
+    json_status_path: str | None = None
+    json_expected_values: list[str] | None = None
+
+    @model_validator(mode="after")
+    def _json_fields_both_or_neither(self) -> "EndpointConfig":
+        path_set = self.json_status_path is not None
+        values_set = self.json_expected_values is not None
+        if path_set != values_set:
+            raise ValueError(
+                "json_status_path and json_expected_values must both be set or both be None"
+            )
+        return self
 
 
 class AlertPlatform(StrEnum):

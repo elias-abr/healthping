@@ -122,3 +122,111 @@ async def test_check_endpoint_timeout() -> None:
     assert result.status == CheckStatus.DOWN
     assert result.error is not None
     assert "Timeout" in result.error
+
+
+@pytest.mark.asyncio
+async def test_check_endpoint_json_validation_match() -> None:
+    """JSON path matching expected value → UP."""
+    endpoint = EndpointConfig(
+        name="mock",
+        url=HttpUrl("http://mock.test/"),
+        json_status_path="status.indicator",
+        json_expected_values=["none", "minor"],
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"status": {"indicator": "none"}})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await check_endpoint(client, endpoint)
+
+    assert result.status == CheckStatus.UP
+    assert result.error is None
+
+
+@pytest.mark.asyncio
+async def test_check_endpoint_json_validation_no_match() -> None:
+    """JSON path value not in expected values → DOWN with error."""
+    endpoint = EndpointConfig(
+        name="mock",
+        url=HttpUrl("http://mock.test/"),
+        json_status_path="status.indicator",
+        json_expected_values=["none", "minor"],
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"status": {"indicator": "major_outage"}})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await check_endpoint(client, endpoint)
+
+    assert result.status == CheckStatus.DOWN
+    assert result.error is not None
+    assert "major_outage" in result.error
+    assert "none" in result.error
+
+
+@pytest.mark.asyncio
+async def test_check_endpoint_json_validation_not_json() -> None:
+    """Non-JSON response body with json_status_path → DOWN."""
+    endpoint = EndpointConfig(
+        name="mock",
+        url=HttpUrl("http://mock.test/"),
+        json_status_path="status.indicator",
+        json_expected_values=["none"],
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="not json at all")
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await check_endpoint(client, endpoint)
+
+    assert result.status == CheckStatus.DOWN
+    assert result.error is not None
+    assert "not valid JSON" in result.error
+
+
+@pytest.mark.asyncio
+async def test_check_endpoint_json_validation_path_missing() -> None:
+    """JSON path missing from response → DOWN."""
+    endpoint = EndpointConfig(
+        name="mock",
+        url=HttpUrl("http://mock.test/"),
+        json_status_path="status.indicator",
+        json_expected_values=["none"],
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"status": {"description": "All good"}})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await check_endpoint(client, endpoint)
+
+    assert result.status == CheckStatus.DOWN
+    assert result.error is not None
+    assert "not found" in result.error
+
+
+def test_endpoint_config_json_fields_both_required() -> None:
+    """Setting only one of the two JSON fields raises ValidationError."""
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        EndpointConfig(
+            name="bad",
+            url=HttpUrl("http://mock.test/"),
+            json_status_path="status.indicator",
+        )
+
+    with pytest.raises(ValidationError):
+        EndpointConfig(
+            name="bad",
+            url=HttpUrl("http://mock.test/"),
+            json_expected_values=["none"],
+        )
